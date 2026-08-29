@@ -68,6 +68,27 @@ Aufnahmedatum, Timecode und Kameramodell standen im `moov` und sind weg. Sie
 stehen aber in den `C####M01.XML`-Dateien, die die Kamera neben jeden Clip legt —
 falls die mitgeborgen wurden, lassen sie sich zurückschreiben.
 
+## Woanders arbeiten
+
+Standardmaessig liest das Werkzeug aus `input/` und schreibt nach `recovered/`
+neben sich selbst. Fuer eine externe Platte zeigst du es dorthin:
+
+```bash
+python3 run.py --ordner /Volumes/SSD/recovery
+```
+
+Es erwartet dort `input/` und `recovered/` und legt sie an, falls sie fehlen. Jeder
+Lauf druckt oben, aus welchem Ordner er liest und wohin er schreibt.
+
+Zwei Dinge vorher pruefen. Waehrend des Laufs liegen die fertige Datei und der
+Zwischenstrom gleichzeitig auf dem Ziel, es braucht also etwa doppelt so viel Platz
+wie das Material gross ist; das Skript warnt vorher. Und die Platte muss exFAT oder
+APFS sein, weil FAT32 keine Datei ueber 4 GB kann und Kameraclips groesser werden:
+
+```bash
+diskutil info /Volumes/DEINE_SSD | grep "File System"
+```
+
 ## Grenzen
 
 - Nur H.264 (XAVC S / XAVC S-I). **XAVC HS ist HEVC** und läuft hier nicht durch;

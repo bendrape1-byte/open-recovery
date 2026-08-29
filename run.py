@@ -5,6 +5,7 @@
   python3 run.py --pruefen            nur pruefen, nichts bauen (schnell)
   python3 run.py --drehen 90 C0056    einzelne Clips hochkant neu bauen
   python3 run.py --referenz DATEI.MP4 einen neuen Aufnahmemodus anlernen
+  python3 run.py --ordner /Volumes/SSD/recovery   anderer Arbeitsordner
 
 Bildrate, Aufloesung und der passende Referenz-Parametersatz werden je Datei aus
 dem Material selbst bestimmt. Die Ausrichtung nicht: die Frames liegen immer quer
@@ -20,6 +21,7 @@ import recover_xavc as rx
 IN, OUT = os.path.join(HERE, "input"), os.path.join(HERE, "recovered")
 DONORS = os.path.join(HERE, "lib", "donors.json")
 SHEET = "_uebersicht.png"
+SWITCHES = ("--pruefen",)                  # Schalter ohne Wert
 RATES = (24, 25, 30, 50, 60)
 CHROMA = {100: "8-bit 4:2:0", 110: "10-bit 4:2:0", 122: "10-bit 4:2:2", 244: "4:4:4"}
 # Cameras preallocate mdat in fixed blocks, so a good clip can be mostly zero
@@ -258,17 +260,41 @@ def preflight():
                  "  Windows        winget install Gyan.FFmpeg\n"
                  "Then open a new terminal and try again.")
 
+def parse(argv):
+    """--flag wert Paare einsammeln, alles Uebrige ist ein Dateinamensfilter."""
+    flags, rest, i = {}, [], 0
+    while i < len(argv):
+        a = argv[i]
+        if not a.startswith("--"): rest.append(a); i += 1
+        elif a in SWITCHES:        flags[a] = True; i += 1
+        else:                      flags[a] = argv[i+1] if i+1 < len(argv) else ""; i += 2
+    return flags, rest
+
+def space_check(need):
+    """Output plus the elementary stream it is built from both live on the target,
+    so a run wants about twice the material it reads."""
+    free = shutil.disk_usage(OUT).free
+    if free < need * 2:
+        print(f"  Achtung: {free/1e9:.1f} GB frei, gebraucht werden etwa "
+              f"{need*2/1e9:.1f} GB. Der Lauf kann mittendrin abbrechen.\n")
+
 def main():
     preflight()
-    argv = sys.argv[1:]
-    if "--referenz" in argv:
-        return add_donor(argv[argv.index("--referenz") + 1])
-    triage = "--pruefen" in argv
-    rot = int(argv[argv.index("--drehen") + 1]) if "--drehen" in argv else 0
-    skip = {"--pruefen"} | ({"--drehen", str(rot)} if rot else set())
-    only = [a for a in argv if a not in skip and not a.startswith("--")]
+    flags, only = parse(sys.argv[1:])
+    if "--referenz" in flags:
+        return add_donor(flags["--referenz"])
+    triage = "--pruefen" in flags
+    rot = int(flags.get("--drehen") or 0)
 
+    global IN, OUT
+    if flags.get("--ordner"):
+        base = os.path.abspath(os.path.expanduser(flags["--ordner"]))
+        if not os.path.isdir(base):
+            sys.exit(f"Ordner gibt es nicht: {base}")
+        IN, OUT = os.path.join(base, "input"), os.path.join(base, "recovered")
     os.makedirs(IN, exist_ok=True); os.makedirs(OUT, exist_ok=True)
+    if not os.access(OUT, os.W_OK):
+        sys.exit(f"Kein Schreibrecht in {OUT}")
     donors = load_donors()
     if not donors:
         sys.exit("Keine Referenzmodi hinterlegt. Einen anlernen:\n"
@@ -280,6 +306,9 @@ def main():
     if not names:
         sys.exit(f"Nichts zu tun - lege die Dateien in {IN}/ ab.")
 
+    print(f"  aus  {IN}\n  nach {OUT}\n")
+    if not triage:
+        space_check(sum(os.path.getsize(os.path.join(IN, n)) for n in names))
     print(f"{len(names)} Datei(en), {len(donors)} Referenzmodi"
           f"{', nur pruefen' if triage else ''}{f', {rot} Grad gedreht' if rot else ''}\n")
     rows = []
@@ -309,7 +338,8 @@ def main():
     movs = sorted(os.path.join(OUT, f) for f in os.listdir(OUT) if f.endswith(".mov"))
     sheet_path = sheet(movs, os.path.join(OUT, SHEET))
     if sheet_path:
-        print(f"\n  Uebersicht: {os.path.relpath(sheet_path, HERE)}")
+        rel = os.path.relpath(sheet_path, HERE)
+        print(f"\n  Uebersicht: {sheet_path if rel.startswith('..') else rel}")
         if rot == 0:
             print("  Liegt darin ein Clip auf der Seite, ihn hochkant neu bauen:")
             print("    python3 run.py --drehen 90 C0056 C0057")

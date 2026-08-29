@@ -145,6 +145,29 @@ To check both prerequisites in one go:
 python3 -V && ffmpeg -version | head -1
 ```
 
+## Working somewhere else
+
+By default the tool reads from `input/` and writes to `recovered/` next to itself.
+To work on an external drive instead, point it at a folder there:
+
+```bash
+python3 run.py --ordner /Volumes/SSD/recovery
+```
+
+It expects `input/` and `recovered/` inside that folder and creates them if they
+are missing. Every run prints which folders it is using, so there is no doubt
+about where the results went.
+
+Two things to check before using an external drive. The finished file and the
+stream it is built from sit on the target at the same time, so a run wants about
+twice the space of the material it reads; the tool checks and warns first. And the
+drive must be exFAT or APFS, because FAT32 cannot hold a file over 4 GB and camera
+clips run larger than that. To check:
+
+```bash
+diskutil info /Volumes/YOUR_SSD | grep "File System"
+```
+
 ## Limits
 
 - H.264 only, which covers XAVC S and XAVC S-I. XAVC HS is HEVC and will not work.
