@@ -23,7 +23,8 @@ way, so the result could be compared against the original frame by frame.
 
 ## What you need
 
-- macOS or Linux, Python 3, and [ffmpeg](https://ffmpeg.org) (`brew install ffmpeg`)
+- macOS or Linux, Python 3.8 or newer, and [ffmpeg](https://ffmpeg.org)
+  (`brew install ffmpeg`)
 - Your broken files
 - For recording modes that are not built in yet, one intact clip from the same
   camera in the same mode. See *Teaching it a new mode* below.
@@ -106,6 +107,25 @@ recovery tool returned those, the information still exists.
 A few frames go missing at the start of each clip, the ones that referenced a
 keyframe that did not survive, and sometimes one at the end where the recovery cut
 mid-frame. In practice that is two to thirteen frames out of several hundred.
+
+## If it does not run
+
+There are no packages to install. Everything the tool imports ships with Python
+itself, so there is no `pip install` step and no virtual environment. Only ffmpeg
+comes from outside, and `ffprobe` is part of the same download.
+
+| What you see | What to do |
+|---|---|
+| `ffmpeg and ffprobe not found on your PATH` | Install ffmpeg. On macOS that is `brew install ffmpeg`, then open a new terminal. |
+| `Python 3.8 or newer required` | Install a current Python from [python.org](https://www.python.org/downloads/). |
+| `command not found: python3` | On Windows the command is `py run.py` instead. |
+| `FEHLER: …` next to one file | That file broke, the rest of the run continued. Send me the line. |
+
+To check both prerequisites in one go:
+
+```bash
+python3 -V && ffmpeg -version | head -1
+```
 
 ## Limits
 

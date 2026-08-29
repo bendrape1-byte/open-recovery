@@ -11,7 +11,7 @@ dem Material selbst bestimmt. Die Ausrichtung nicht: die Frames liegen immer que
 im Stream, nur die verlorene tkhd-Matrix wusste, dass die Kamera hochkant stand.
 Dafuer legt der Lauf recovered/_uebersicht.png an - ein Blick genuegt.
 """
-import base64, json, os, statistics, subprocess, sys, tempfile
+import base64, json, os, shutil, statistics, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "lib"))
@@ -119,6 +119,8 @@ def handle(name, donors, rot, triage_only):
     path = os.path.join(IN, name)
     size = f"{os.path.getsize(path)/1e6:.0f} MB"
     d = open(path, 'rb').read()
+    if not d:
+        return (name, size, "-", "-", "-", "LEER - 0 Byte")
     data = (len(d) - d.count(0)) / len(d)
     segs = rx.segments(d)
     vbytes = sum(b - a for a, b in segs)
@@ -180,7 +182,20 @@ def contact_sheet():
 
 # ------------------------------------------------------------ main
 
+def preflight():
+    """Say what is missing instead of dying inside a subprocess call later on."""
+    if sys.version_info < (3, 8):
+        sys.exit(f"Python 3.8 or newer required, found {sys.version.split()[0]}.")
+    missing = [b for b in ("ffmpeg", "ffprobe") if not shutil.which(b)]
+    if missing:
+        sys.exit(f"{' and '.join(missing)} not found on your PATH. Install it:\n"
+                 "  macOS          brew install ffmpeg\n"
+                 "  Debian/Ubuntu  sudo apt install ffmpeg\n"
+                 "  Windows        winget install Gyan.FFmpeg\n"
+                 "Then open a new terminal and try again.")
+
 def main():
+    preflight()
     argv = sys.argv[1:]
     if "--referenz" in argv:
         return add_donor(argv[argv.index("--referenz") + 1])
@@ -209,7 +224,11 @@ def main():
         if not triage and not only and os.path.exists(out):
             print(f"  {name:<22} schon da - uebersprungen")
             continue
-        row = handle(name, donors, rot, triage)
+        try:
+            row = handle(name, donors, rot, triage)
+        except Exception as e:                     # one bad file must not stop the run
+            row = (name, f"{os.path.getsize(os.path.join(IN, name))/1e6:.0f} MB",
+                   "-", "-", "-", f"FEHLER: {type(e).__name__}: {e}")
         rows.append(row)
         print(f"  {row[0]:<22} {row[5]}")
     if not rows: return
