@@ -11,7 +11,7 @@ dem Material selbst bestimmt. Die Ausrichtung nicht: die Frames liegen immer que
 im Stream, nur die verlorene tkhd-Matrix wusste, dass die Kamera hochkant stand.
 Dafuer legt der Lauf recovered/_uebersicht.png an - ein Blick genuegt.
 """
-import base64, json, os, shutil, statistics, subprocess, sys, tempfile
+import base64, json, os, re, shutil, statistics, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "lib"))
@@ -25,6 +25,12 @@ CHROMA = {100: "8-bit 4:2:0", 110: "10-bit 4:2:0", 122: "10-bit 4:2:2", 244: "4:
 # Cameras preallocate mdat in fixed blocks, so a good clip can be mostly zero
 # padding. Judge on how much video is there, not on its share of the file.
 MIN_VIDEO = 2_000_000
+# A carved region often holds photos rather than video: the recovery tool takes the
+# name from a directory entry that does not match what is actually in the clusters.
+# Sony raw files carry a full preview near their front, which frequently survives
+# even when the sensor data behind it does not.
+JPEG_START = re.compile(b'\xff\xd8\xff[\xe0-\xef]')
+PHOTO_MIN = 50_000                 # below that it is the thumbnail, not the preview
 
 # ------------------------------------------------------------ reference clips
 
@@ -115,6 +121,31 @@ def probe(chunk, donor):
     os.unlink(tmp)
     return sum(1 for l in r.stderr.splitlines() if "error" in l or "corrupt" in l)
 
+def find_photos(d):
+    """Byte ranges of the embedded JPEGs, largest variant only."""
+    out = []
+    for m in JPEG_START.finditer(d):
+        s = m.start()
+        e = d.find(b'\xff\xd9', s)
+        if e > 0 and e - s >= PHOTO_MIN: out.append((s, e + 2))
+    return out
+
+def extract_photos(d, name):
+    """Write the photos out and keep only the ones that actually decode."""
+    outdir = os.path.join(OUT, os.path.splitext(name)[0] + "_fotos")
+    os.makedirs(outdir, exist_ok=True)
+    kept = []
+    for i, (a, b) in enumerate(find_photos(d), 1):
+        p = os.path.join(outdir, f"{i:03d}.jpg")
+        open(p, 'wb').write(d[a:b])
+        ok = subprocess.run(["ffprobe","-v","error","-show_entries","stream=width",
+                             "-of","csv=p=0", p], capture_output=True, text=True)
+        if ok.returncode == 0 and ok.stdout.strip(): kept.append(p)
+        else: os.unlink(p)
+    if kept: sheet(kept, os.path.join(outdir, SHEET), seek=None)
+    else: os.rmdir(outdir)
+    return kept, outdir
+
 def check(path):
     """What the container promises against what the decoder actually hands out."""
     def run(c): return subprocess.run(c, capture_output=True, text=True)
@@ -137,9 +168,17 @@ def handle(name, donors, rot, triage_only):
     segs = rx.segments(d)
     vbytes = sum(b - a for a, b in segs)
     if vbytes < MIN_VIDEO:
+        photos = find_photos(d)
+        if photos and triage_only:
+            return (name, size, "-", "Fotos", str(len(photos)),
+                    f"{len(photos)} Fotos gefunden, kein Video")
+        if photos:
+            kept, outdir = extract_photos(d, name)
+            return (name, size, "-", "Fotos", str(len(kept)),
+                    f"{len(kept)} Fotos gesichert in {os.path.basename(outdir)}/")
         return (name, size, "-", "-", "-",
                 "LEER - nichts geborgen" if data < 0.05
-                else f"kein Video ({data*100:.0f}% Daten)")
+                else f"kein Video, keine Fotos ({data*100:.0f}% Daten)")
 
     mbs, ids, fps, raw = analyse(d, segs)
     if not fps:
@@ -183,26 +222,27 @@ def handle(name, donors, rot, triage_only):
 
 # ------------------------------------------------------------ overview image
 
-def contact_sheet():
-    movs = sorted(f for f in os.listdir(OUT) if f.endswith(".mov"))
-    if not movs: return None
+def sheet(paths, out, seek="1.5", cols=None):
+    """One still per file, tiled. The fastest way to see what came back."""
+    if not paths: return None
+    cols = cols or min(3 if seek else 7, len(paths))
+    rows = (len(paths) + cols - 1) // cols
+    side = ["400","300"] if seek else ["260","174"]
     with tempfile.TemporaryDirectory() as tmp:
-        for i, f in enumerate(movs):
-            label = f.split("_")[0]
-            subprocess.run(["ffmpeg","-v","error","-ss","1.5","-i", os.path.join(OUT, f),
-                "-vf", f"scale=400:300:force_original_aspect_ratio=decrease,"
-                       f"pad=400:300:(ow-iw)/2:(oh-ih)/2:gray,"
-                       f"drawtext=text='{label}':x=6:y=4:fontsize=24:fontcolor=yellow:"
+        for i, p in enumerate(paths):
+            label = os.path.splitext(os.path.basename(p))[0].split("_")[0]
+            cmd = ["ffmpeg","-v","error"] + (["-ss", seek] if seek else []) + ["-i", p,
+                "-vf", f"scale={side[0]}:{side[1]}:force_original_aspect_ratio=decrease,"
+                       f"pad={side[0]}:{side[1]}:(ow-iw)/2:(oh-ih)/2:gray,"
+                       f"drawtext=text='{label}':x=5:y=4:fontsize=20:fontcolor=yellow:"
                        f"box=1:boxcolor=black@0.7",
-                "-frames:v","1","-y", os.path.join(tmp, f"{i:03d}.png")], capture_output=True)
-        cols = min(3, len(movs))
-        rows = (len(movs) + cols - 1) // cols
-        sheet = os.path.join(OUT, SHEET)
+                "-frames:v","1","-y", os.path.join(tmp, f"{i:03d}.png")]
+            subprocess.run(cmd, capture_output=True)
         subprocess.run(["ffmpeg","-v","error","-framerate","1","-pattern_type","glob",
                         "-i", os.path.join(tmp, "*.png"),
-                        "-vf", f"tile={cols}x{rows}", "-frames:v","1","-y", sheet],
+                        "-vf", f"tile={cols}x{rows}", "-frames:v","1","-y", out],
                        capture_output=True)
-        return sheet if os.path.exists(sheet) else None
+    return out if os.path.exists(out) else None
 
 # ------------------------------------------------------------ main
 
@@ -266,9 +306,10 @@ def main():
         print("  " + "  ".join(str(c).ljust(w[i]) for i, c in enumerate(r)))
 
     if triage: return
-    sheet = contact_sheet()
-    if sheet:
-        print(f"\n  Uebersicht: {os.path.relpath(sheet, HERE)}")
+    movs = sorted(os.path.join(OUT, f) for f in os.listdir(OUT) if f.endswith(".mov"))
+    sheet_path = sheet(movs, os.path.join(OUT, SHEET))
+    if sheet_path:
+        print(f"\n  Uebersicht: {os.path.relpath(sheet_path, HERE)}")
         if rot == 0:
             print("  Liegt darin ein Clip auf der Seite, ihn hochkant neu bauen:")
             print("    python3 run.py --drehen 90 C0056 C0057")

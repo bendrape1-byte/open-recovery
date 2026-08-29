@@ -61,6 +61,7 @@ python3 run.py --pruefen
 | `kein Referenzmodus: …` | This recording mode is not known yet. See below. |
 | `… passen formal, keiner besteht die Probedekodierung` | References of the right size and rate exist, but none decodes this footage. Usually a sub-mode with different encoder settings, so add a reference from exactly this clip's mode. |
 | `nur 18% der Datei war brauchbar` | The recovery returned this clip in pieces. What came back is real, there is just far less of it than the file size suggests. |
+| `45 Fotos gesichert in …` | Not a video at all. See *When it turns out to be photos*. |
 | `PRUEFEN: …` | Something was built, but it failed the check. Do not trust it. |
 
 `OK` is not a guess. Every finished file has to pass two tests: the container must
@@ -68,6 +69,21 @@ promise exactly as many frames as the decoder actually produces, and decoding th
 whole clip must raise zero errors. A file with its frames in the wrong order fails
 that check, which is the point. Someone watching the first few seconds would not
 have caught it.
+
+## When it turns out to be photos
+
+A recovery tool takes the file name from a directory entry, and that entry does not
+always match what is actually in the clusters behind it. So a file called
+`C9937.MP4` can turn out to hold stills instead of video.
+
+The tool notices. If a file has no video in it but does contain JPEGs, they get
+written to `recovered/<name>_fotos/` with a contact sheet, and the run reports how
+many. Each one is decoded before it is kept, so the count is real.
+
+What you get from a Sony raw file this way is the preview it carries near its
+front, typically 1616x1080. That is enough for the web, for social, and for showing
+a client what was shot. It is not the raw sensor data, which sits behind the
+preview and is usually the part that did not survive.
 
 ## The one thing you have to decide
 
