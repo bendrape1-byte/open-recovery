@@ -175,25 +175,38 @@ def find(d, start, end, path):
             if hit: return hit
     return None
 
-def parameter_sets(ref):
-    """SPS/PPS sit ready-made in the reference's avcC box - no decoding needed.
+def moov_span(path):
+    """Offset and size of the moov box, by seeking the top-level boxes.
 
-    Cameras write moov at the end of the file, so seek through the top-level
-    boxes instead of reading gigabytes.
+    Cameras and ffmpeg both write moov at the end, so this avoids pulling
+    gigabytes of mdat through memory to reach a few kilobytes of tables.
     """
-    with open(ref,'rb') as f:
-        moov = None
+    with open(path,'rb') as f:
         while True:
             hdr = f.read(8)
-            if len(hdr) < 8: break
+            if len(hdr) < 8: return None
             sz = struct.unpack(">I", hdr[:4])[0]; typ = hdr[4:8]
             off = f.tell() - 8
             if sz == 1: sz = struct.unpack(">Q", f.read(8))[0]
-            if sz < 8: break
-            if typ == b'moov': moov = (off, sz); break
+            if sz < 8: return None
+            if typ == b'moov': return off, sz
             f.seek(off + sz)
-        if not moov: sys.exit(f"no moov in {ref} - is it an MP4/MOV?")
-        f.seek(moov[0]); d = f.read(moov[1])
+
+def read_moov(path):
+    """-> (offset in the file, the box as a mutable buffer)"""
+    span = moov_span(path)
+    if not span: sys.exit(f"no moov in {path} - is it an MP4/MOV?")
+    with open(path,'rb') as f:
+        f.seek(span[0]); return span[0], bytearray(f.read(span[1]))
+
+def write_moov(path, off, buf):
+    """moov is the last box, so a patched one is simply written over the tail."""
+    with open(path,'r+b') as f:
+        f.seek(off); f.write(buf); f.truncate()
+
+def parameter_sets(ref):
+    """SPS/PPS sit ready-made in the reference's avcC box - no decoding needed."""
+    _, d = read_moov(ref)
 
     stsd = find(d, 8, len(d), ('trak','mdia','minf','stbl','stsd'))
     i = d.find(b'avcC', stsd[0] if stsd else 0)
@@ -245,7 +258,8 @@ def chunk_nals(d, a):
     A resync can land in the middle of a frame; the orphan slices ahead of the
     next access unit delimiter would then be counted as a frame of their own.
     """
-    ns = [n for o, l in walk(d, a)[0] if not NOT_A_NAL.search(n := d[o:o+l])]
+    mv = memoryview(d)                    # views, not copies: the payload is huge
+    ns = [n for o, l in walk(d, a)[0] if not NOT_A_NAL.search(n := mv[o:o+l])]
     for i, n in enumerate(ns[:16]):
         if n[0] & 0x1f == 9: return ns[i:]         # access unit delimiter
     return ns
@@ -281,9 +295,8 @@ def patch_ctts(path, offsets, frame_ticks):
     be non-negative so a version-0 table works everywhere; the same shift then
     goes into the edit list, which is exactly how the camera writes it.
     """
-    d = bytearray(open(path,'rb').read())
-    moov = find(d, 0, len(d), ('moov',))
-    if not moov: sys.exit("no moov")
+    moov_off, d = read_moov(path)
+    moov = (0, len(d))
     chain = trak = None
     for p, sz, typ in boxes(d, moov[0]+8, moov[0]+moov[1]):
         if typ != b'trak': continue
@@ -328,7 +341,7 @@ def patch_ctts(path, offsets, frame_ticks):
     d[at:at] = ctts
     for off, sz in chain:                             # grow every ancestor
         struct.pack_into(">I", d, off, sz + len(ctts))
-    open(path,'wb').write(d)
+    write_moov(path, moov_off, d)
     return len(runs), shift
 
 def set_rotation(path, deg):
@@ -341,8 +354,8 @@ def set_rotation(path, deg):
     """
     deg %= 360
     if deg == 0: return 0
-    d = bytearray(open(path,'rb').read())
-    moov = find(d, 0, len(d), ('moov',))
+    moov_off, d = read_moov(path)
+    moov = (0, len(d))
     tkhd = None
     for p, sz, typ in boxes(d, moov[0]+8, moov[0]+moov[1]):
         if typ != b'trak': continue
@@ -360,7 +373,7 @@ def set_rotation(path, deg):
     for i, v in enumerate(m):
         struct.pack_into(">i", d, base+i*4, v)
     struct.pack_into(">i", d, base+32, 0x40000000)
-    open(path,'wb').write(d)
+    write_moov(path, moov_off, d)
     return deg
 
 # ---------------------------------------------------------------- main
@@ -425,6 +438,12 @@ def rebuild(broken, sps, pps, out, fps=25, rot=0, log=print):
     # picture. Never let it play past the last frame.
     pcm = pcm[:len(au) * AUDIO_RATE // fps]
     pcm = pcm[:len(pcm) // 4 * 4]                               # whole stereo frames
+
+    # Everything below works on files, not on the payload, and ffmpeg is about to
+    # want memory of its own. Keep the numbers, drop the gigabytes.
+    stats = (len(segs), len(nals), sum(b - a for a, b in segs) / len(d) * 100)
+    del d, nals, segs, starts
+
     cmd = ["ffmpeg","-v","error","-r",str(fps),"-i",es]
     if pcm:
         ap = out + ".pcm"; open(ap,'wb').write(pcm)
@@ -444,8 +463,8 @@ def rebuild(broken, sps, pps, out, fps=25, rot=0, log=print):
         os.unlink(out)                 # never leave a half-fixed file behind
         raise
 
-    log(f"{len(segs)} video chunks, {len(nals)} NALs, "
-          f"{sum(b-a for a,b in segs)/len(d)*100:.1f}% of the file is video payload")
+    log(f"{stats[0]} video chunks, {stats[1]} NALs, "
+        f"{stats[2]:.1f}% of the file is video payload")
     log(f"dropped {first} frames before the first IDR, "
           f"{len(leading)} open-GOP leading frames"
           f"{f', {len(partial)} partial frames' if partial else ''}; kept {len(au)}")
