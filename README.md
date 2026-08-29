@@ -138,6 +138,7 @@ comes from outside, and `ffprobe` is part of the same download.
 | `Python 3.8 or newer required` | Install a current Python from [python.org](https://www.python.org/downloads/). |
 | `command not found: python3` | On Windows the command is `py run.py` instead. |
 | `FEHLER: …` next to one file | That file broke, the rest of the run continued. Send me the line. |
+| Rows for files starting with `._` | macOS companion files, written when copying onto exFAT. They are skipped now; `dot_clean /Volumes/YOUR_SSD` removes the ones already there. |
 
 To check both prerequisites in one go:
 

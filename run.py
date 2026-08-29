@@ -300,7 +300,11 @@ def main():
         sys.exit("Keine Referenzmodi hinterlegt. Einen anlernen:\n"
                  "  python3 run.py --referenz /pfad/zu/einem/heilen/clip.MP4")
 
-    names = sorted(f for f in os.listdir(IN) if f.lower().endswith((".mp4", ".mov")))
+    # macOS drops a "._name" companion next to every file it copies onto exFAT,
+    # holding extended attributes and no video. They sort to the top of the list
+    # and would fill the report with empty rows.
+    names = sorted(f for f in os.listdir(IN)
+                   if f.lower().endswith((".mp4", ".mov")) and not f.startswith("."))
     if only:
         names = [n for n in names if any(o in n for o in only)]
     if not names:
