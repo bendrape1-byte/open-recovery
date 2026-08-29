@@ -1,0 +1,234 @@
+#!/usr/bin/env python3
+"""Sony XAVC recovery - everything in input/ becomes a playable file in recovered/.
+
+  python3 run.py                      alles aus input/ wiederherstellen
+  python3 run.py --pruefen            nur pruefen, nichts bauen (schnell)
+  python3 run.py --drehen 90 C0056    einzelne Clips hochkant neu bauen
+  python3 run.py --referenz DATEI.MP4 einen neuen Aufnahmemodus anlernen
+
+Bildrate, Aufloesung und der passende Referenz-Parametersatz werden je Datei aus
+dem Material selbst bestimmt. Die Ausrichtung nicht: die Frames liegen immer quer
+im Stream, nur die verlorene tkhd-Matrix wusste, dass die Kamera hochkant stand.
+Dafuer legt der Lauf recovered/_uebersicht.png an - ein Blick genuegt.
+"""
+import base64, json, os, statistics, subprocess, sys, tempfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "lib"))
+import recover_xavc as rx
+
+IN, OUT = os.path.join(HERE, "input"), os.path.join(HERE, "recovered")
+DONORS = os.path.join(HERE, "lib", "donors.json")
+SHEET = "_uebersicht.png"
+RATES = (24, 25, 30, 50, 60)
+CHROMA = {100: "8-bit 4:2:0", 110: "10-bit 4:2:0", 122: "10-bit 4:2:2", 244: "4:4:4"}
+# Cameras preallocate mdat in fixed blocks, so a good clip can be mostly zero
+# padding. Judge on how much video is there, not on its share of the file.
+MIN_VIDEO = 2_000_000
+
+# ------------------------------------------------------------ reference clips
+
+def load_donors():
+    """Parameter sets only - the multi-gigabyte reference clips are not needed."""
+    if not os.path.exists(DONORS): return []
+    out = []
+    for x in json.load(open(DONORS))["donors"]:
+        out.append({**x,
+                    "sps": [base64.b64decode(s) for s in x["sps"]],
+                    "pps": [base64.b64decode(p) for p in x["pps"]]})
+    return out
+
+def add_donor(path):
+    sps, pps = rx.parameter_sets(path)
+    w, h = rx.sps_geometry(sps[0])
+    r = subprocess.run(["ffprobe","-v","error","-select_streams","v:0","-show_entries",
+                        "stream=r_frame_rate","-of","csv=p=0", path],
+                       capture_output=True, text=True).stdout.strip().strip(',')
+    num, den = (r.split("/") + ["1"])[:2]
+    fps = min(RATES, key=lambda x: abs(x - int(num)/int(den)))
+    entry = {"name": f"{w*16}x{h*16} {fps}p {CHROMA.get(sps[0][1], f'profile {sps[0][1]}')}",
+             "from": os.path.basename(path), "mbs": w*h, "fps": fps,
+             "profile": sps[0][1], "level": sps[0][3]/10,
+             "pps_ids": sorted(rx.Bits(rx.rbsp(x[1:])).ue() for x in pps),
+             "sps": [base64.b64encode(x).decode() for x in sps],
+             "pps": [base64.b64encode(x).decode() for x in pps]}
+    doc = json.load(open(DONORS)) if os.path.exists(DONORS) else {"donors": []}
+    doc["donors"] = [d for d in doc["donors"] if d["name"] != entry["name"]] + [entry]
+    json.dump(doc, open(DONORS, "w"), indent=2)
+    print(f"angelernt: {entry['name']}  (PPS {entry['pps_ids']}, aus {entry['from']})")
+
+# ------------------------------------------------------------ per file
+
+def analyse(d, segs):
+    """Macroblocks, needed PPS ids and frame rate, straight from the payload.
+
+    The rate falls out of the interleave: every gap holds the LPCM for the chunk
+    before it, so audio seconds against frames in that chunk give it.
+    """
+    max_fmb, ids, per_chunk = 0, set(), []
+    for a, _ in segs:
+        n0 = 0
+        for n in rx.chunk_nals(d, a):
+            if n[0] & 0x1f not in (1, 5): continue
+            r = rx.Bits(rx.rbsp(n[1:48]))
+            fmb = r.ue(); r.ue(); ids.add(r.ue())
+            max_fmb = max(max_fmb, fmb)
+            if fmb == 0: n0 += 1
+        per_chunk.append(n0)
+    audio = []
+    for i in range(len(segs) - 1):
+        k = d[segs[i][1]:segs[i+1][0]].find(rx.KLV)
+        if k > rx.AUDIO_HDR: audio.append(k - rx.AUDIO_HDR)
+    if not audio or len(per_chunk) < 2:
+        return max_fmb, ids, None, None
+    raw = statistics.median(per_chunk[:len(audio)]) / (statistics.median(audio) / rx.AUDIO_RATE)
+    return max_fmb, ids, min(RATES, key=lambda r: abs(r - raw)), raw
+
+def probe(d, segs, donor):
+    """Decode a few frames from the first IDR. A donor with the wrong bit depth or
+    chroma format parses the slice data into noise, and the decoder says so."""
+    for a, _ in segs:
+        ns = rx.chunk_nals(d, a)
+        idr = next((i for i, n in enumerate(ns) if n[0] & 0x1f == 5), None)
+        if idr is not None: break
+    else:
+        return 10**6
+    while idr > 0 and ns[idr-1][0] & 0x1f in (6, 9): idr -= 1
+    with tempfile.NamedTemporaryFile(suffix=".h264", delete=False) as f:
+        f.write(b''.join(b'\x00\x00\x00\x01' + x for x in donor["sps"] + donor["pps"]))
+        for n in ns[idr:]: f.write(b'\x00\x00\x00\x01' + n)
+        tmp = f.name
+    r = subprocess.run(["ffmpeg","-v","error","-f","h264","-i",tmp,
+                        "-frames:v","8","-f","null","-"], capture_output=True, text=True)
+    os.unlink(tmp)
+    return sum(1 for l in r.stderr.splitlines() if "error" in l or "corrupt" in l)
+
+def check(path):
+    """What the container promises against what the decoder actually hands out."""
+    def run(c): return subprocess.run(c, capture_output=True, text=True)
+    n = run(["ffprobe","-v","error","-select_streams","v:0","-show_entries",
+             "packet=pts","-of","csv=p=0", path]).stdout
+    m = run(["ffprobe","-v","error","-select_streams","v:0","-show_entries",
+             "frame=best_effort_timestamp","-of","csv=p=0", path]).stdout
+    e = run(["ffmpeg","-v","error","-i", path, "-f","null","-"]).stderr
+    return (len([l for l in n.splitlines() if l.strip()]),
+            len([l for l in m.splitlines() if l.strip()]),
+            sum(1 for l in e.splitlines() if "error" in l or "corrupt" in l))
+
+def handle(name, donors, rot, triage_only):
+    path = os.path.join(IN, name)
+    size = f"{os.path.getsize(path)/1e6:.0f} MB"
+    d = open(path, 'rb').read()
+    data = (len(d) - d.count(0)) / len(d)
+    segs = rx.segments(d)
+    vbytes = sum(b - a for a, b in segs)
+    if vbytes < MIN_VIDEO:
+        return (name, size, "-", "-", "-",
+                "LEER - nichts geborgen" if data < 0.05
+                else f"kein Video ({data*100:.0f}% Daten)")
+
+    mbs, ids, fps, raw = analyse(d, segs)
+    if not fps:
+        return (name, size, "-", "-", "-", "Bildrate nicht messbar")
+    # Geometry and PPS coverage are not enough: a reference from the same
+    # resolution but another frame rate decodes without complaint and still lands
+    # a few dB off, because the rest of its SPS/PPS was tuned for that mode.
+    pick = next((c for c in donors
+                 if c["mbs"] > mbs and c["fps"] == fps and set(ids) <= set(c["pps_ids"])
+                 and probe(d, segs, c) == 0), None)
+    if not pick:
+        return (name, size, f"{fps}p", "-", "-",
+                f"kein Referenzmodus fuer {mbs*16} MB / PPS {sorted(ids)}")
+    if triage_only:
+        return (name, size, f"{fps}p", pick["name"], "-", f"bereit ({vbytes/1e6:.0f} MB Video)")
+
+    out = os.path.join(OUT, os.path.splitext(name)[0] + "_recovered.mov")
+    del d, segs
+    try:
+        frames, secs, _ = rx.rebuild(path, pick["sps"], pick["pps"], out, fps, rot,
+                                     log=lambda *_: None)
+    except SystemExit as e:
+        return (name, size, f"{fps}p", pick["name"], "-", str(e))
+    boxed, shown, errs = check(out)
+    drift = "" if abs(raw - fps) / fps < 0.01 else f", gemessen {raw:.2f}"
+    return (name, size, f"{fps}p", pick["name"], str(shown),
+            f"OK ({frames/fps:.0f}s Bild, {secs:.0f}s Ton){drift}" if boxed == shown and errs == 0
+            else f"PRUEFEN: {boxed}/{shown} Frames, {errs} Fehler")
+
+# ------------------------------------------------------------ overview image
+
+def contact_sheet():
+    movs = sorted(f for f in os.listdir(OUT) if f.endswith(".mov"))
+    if not movs: return None
+    with tempfile.TemporaryDirectory() as tmp:
+        for i, f in enumerate(movs):
+            label = f.split("_")[0]
+            subprocess.run(["ffmpeg","-v","error","-ss","1.5","-i", os.path.join(OUT, f),
+                "-vf", f"scale=400:300:force_original_aspect_ratio=decrease,"
+                       f"pad=400:300:(ow-iw)/2:(oh-ih)/2:gray,"
+                       f"drawtext=text='{label}':x=6:y=4:fontsize=24:fontcolor=yellow:"
+                       f"box=1:boxcolor=black@0.7",
+                "-frames:v","1","-y", os.path.join(tmp, f"{i:03d}.png")], capture_output=True)
+        cols = min(3, len(movs))
+        rows = (len(movs) + cols - 1) // cols
+        sheet = os.path.join(OUT, SHEET)
+        subprocess.run(["ffmpeg","-v","error","-framerate","1","-pattern_type","glob",
+                        "-i", os.path.join(tmp, "*.png"),
+                        "-vf", f"tile={cols}x{rows}", "-frames:v","1","-y", sheet],
+                       capture_output=True)
+        return sheet if os.path.exists(sheet) else None
+
+# ------------------------------------------------------------ main
+
+def main():
+    argv = sys.argv[1:]
+    if "--referenz" in argv:
+        return add_donor(argv[argv.index("--referenz") + 1])
+    triage = "--pruefen" in argv
+    rot = int(argv[argv.index("--drehen") + 1]) if "--drehen" in argv else 0
+    skip = {"--pruefen"} | ({"--drehen", str(rot)} if rot else set())
+    only = [a for a in argv if a not in skip and not a.startswith("--")]
+
+    os.makedirs(IN, exist_ok=True); os.makedirs(OUT, exist_ok=True)
+    donors = load_donors()
+    if not donors:
+        sys.exit("Keine Referenzmodi hinterlegt. Einen anlernen:\n"
+                 "  python3 run.py --referenz /pfad/zu/einem/heilen/clip.MP4")
+
+    names = sorted(f for f in os.listdir(IN) if f.lower().endswith((".mp4", ".mov")))
+    if only:
+        names = [n for n in names if any(o in n for o in only)]
+    if not names:
+        sys.exit(f"Nichts zu tun - lege die Dateien in {IN}/ ab.")
+
+    print(f"{len(names)} Datei(en), {len(donors)} Referenzmodi"
+          f"{', nur pruefen' if triage else ''}{f', {rot} Grad gedreht' if rot else ''}\n")
+    rows = []
+    for name in names:
+        out = os.path.join(OUT, os.path.splitext(name)[0] + "_recovered.mov")
+        if not triage and not only and os.path.exists(out):
+            print(f"  {name:<22} schon da - uebersprungen")
+            continue
+        row = handle(name, donors, rot, triage)
+        rows.append(row)
+        print(f"  {row[0]:<22} {row[5]}")
+    if not rows: return
+
+    hdr = ("Datei", "Groesse", "Rate", "Modus", "Frames", "Befund")
+    w = [max(len(str(r[i])) for r in rows + [hdr]) for i in range(6)]
+    print()
+    print("  " + "  ".join(h.ljust(w[i]) for i, h in enumerate(hdr)))
+    print("  " + "  ".join("-" * w[i] for i in range(6)))
+    for r in rows:
+        print("  " + "  ".join(str(c).ljust(w[i]) for i, c in enumerate(r)))
+
+    if triage: return
+    sheet = contact_sheet()
+    if sheet:
+        print(f"\n  Uebersicht: {os.path.relpath(sheet, HERE)}")
+        if rot == 0:
+            print("  Liegt darin ein Clip auf der Seite, ihn hochkant neu bauen:")
+            print("    python3 run.py --drehen 90 C0056 C0057")
+
+if __name__ == "__main__":
+    main()

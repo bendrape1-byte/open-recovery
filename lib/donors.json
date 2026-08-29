@@ -1,0 +1,92 @@
+{
+  "donors": [
+    {
+      "name": "3840x2160 25p 10-bit 4:2:2",
+      "from": "C0071.MP4",
+      "mbs": 32400,
+      "fps": 25,
+      "profile": 122,
+      "level": 5.1,
+      "pps_ids": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "sps": [
+        "J3oAM7bNMA8AEPsBagICAoAACWAAAdTAeGAAQsAAAIWAF3lxwwACFgAABCwAu8uHwiEUWA=="
+      ],
+      "pps": [
+        "KO4zTiP//Ef/+I//8R//4j//xH//iP//////////Ef/////////9QA==",
+        "KFuM04hU0uTFREQqaXJioiIVNLkxUREKtOk1qIVadJrUQq06TWohev8n/6/r8nyeM5MkkQvX+v/yF+SXyX0i5LpFJpQ=",
+        "KHuM04gkmTisKRkQaIxXEYqKiDRGK4jFRUQSTJxWFIyINEYriMVFRBojFcRioqIVa69fX5P4j83xXhjmxE0Qq116+vyfxH5vivDHNiJl",
+        "KCbjNOIESYgsgNAyGAScQEIQGjAxwphSMiAhCA0YGOFMKRkQIkxBZAaBkMAk4gIQgNGBjhTCkZEBCEBowMcKYUjIgkn5CZSfJJlkxETjAoTKFQSQxDMEnjP/EEk/ITKT5JMsmIicYFCZQqCSGIZgk8Z/1A=="
+      ]
+    },
+    {
+      "name": "3840x2160 25p 8-bit 4:2:0",
+      "from": "C0006.MP4",
+      "mbs": 32400,
+      "fps": 25,
+      "profile": 100,
+      "level": 5.1,
+      "pps_ids": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "sps": [
+        "J2QAM6zTAPABD7AWoCFgKAAAlgAAHUwHZAAHJwAAD0JBd5cbIAA5OAAAehILvLh8IhFFgA=="
+      ],
+      "pps": [
+        "KO484j//xH//RH//iP/+iP//////////Ef//////////",
+        "KFuPOIVNG6zSRCpo3WaREKtOk1qIVadJrSIXp1TTInTojRWIKuyIqaZCH5kfMQ80pFxC9f6//IX5JfJfSLkukUms",
+        "KHuPOIJIUgzkxkREEkKQZyYyIRBJMhZE0qiCSZCyJpUiFTSdIhzFMR0VEM0co4STlEGFkaKKMN4ww1oYYbGISIVRCrXXr6dOhAn4iJ8RPzI+ZHmRzKs=",
+        "KCbjziBEhSDBESMxkRECJCkGCIkZjIhECJMnJkkiBEmTkySIgkjSdIhzFMR0UyMUh2OEkdFECBaaYoQN4wQPaHGCMIIeOVRBJNdevr8YL+KQvxSF8UQbjENjENGKsA=="
+      ]
+    },
+    {
+      "name": "1920x1088 60p 8-bit 4:2:0",
+      "from": "C0108.MP4",
+      "mbs": 8160,
+      "fps": 60,
+      "profile": 100,
+      "level": 4.2,
+      "pps_ids": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "sps": [
+        "J2QAKqzTAeAIn5cBbgQEBIAAA+kAAdTAdkAAcnAAAPQkF3lxsgADk4AAB6Egu8uHwiEUWA=="
+      ],
+      "pps": [
+        "KO484j//xH//RH//iP/+iP//////////Ef//////////",
+        "KFuPOIVNG6zSRCpo3WaREKtOk1qIVadJrSIXp1TTInTojRWIKuyIqaZCH5kfMQ80pFxC9f6//IX5JfJfSLkukUms",
+        "KHuPOIJIUgzkxkREEkKQZyYyIRBJMhZE0qiCSZCyJpUiFTSdIhzFMR0VEM0co4STlEGFkaKKMN4ww1oYYbGISIVRCrXXr6dOhAn4iJ8RPzI+ZHmRzKs=",
+        "KCbjziBEhSDBESMxkRECJCkGCIkZjIhECJMnJkkiBEmTkySIgkjSdIhzFMR0UyMUh2OEkdFECBaaYoQN4wQPaHGCMIIeOVRBJNdevr8YL+KQvxSF8UQbjENjENGKsA=="
+      ]
+    },
+    {
+      "name": "1920x1088 50p 8-bit 4:2:0",
+      "from": "C9987.MP4",
+      "mbs": 8160,
+      "fps": 50,
+      "profile": 100,
+      "level": 4.2,
+      "pps_ids": [
+        2,
+        3
+      ],
+      "sps": [
+        "J2QAKqzTAeAIn5cBbgQEBIAABLAAAdTAdkAAcnAAAPQkF3lxsgADk4AAB6Egu8uHwiEUWA=="
+      ],
+      "pps": [
+        "KHuM04gkmTisKRkQaIxXEYqKiDRGK4jFRUQSTJxWFIyINEYriMVFRBojFcRioqIVa69fX5P4j83xXhjmxE0Qq116+vyfxH5vivDHNiJl",
+        "KCbjNOIESYgsgNAyGAScQEIQGjAxwphSMiAhCA0YGOFMKRkQIkxBZAaBkMAk4gIQgNGBjhTCkZEBCEBowMcKYUjIgkn5CZSfJJlkxETjAoTKFQSQxDMEnjP/EEk/ITKT5JMsmIicYFCZQqCSGIZgk8Z/1A=="
+      ]
+    }
+  ]
+}

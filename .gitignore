@@ -1,0 +1,9 @@
+# Videomaterial gehoert nicht ins Repo
+input/*
+recovered/*
+!input/.gitkeep
+!recovered/.gitkeep
+
+__pycache__/
+*.pyc
+.DS_Store
