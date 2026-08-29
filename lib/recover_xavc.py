@@ -420,6 +420,10 @@ def rebuild(broken, sps, pps, out, fps=25, rot=0, log=print):
             for n in nals[lo:hi]: f.write(b'\x00\x00\x00\x01' + n)
 
     pcm = audio_from_gaps(d, segs)[head * AUDIO_RATE // fps:]   # keep A/V in sync
+    # A chunk that the carve only returned in part still leaves a full audio chunk
+    # in the gap behind it, so on a badly fragmented file the sound outruns the
+    # picture. Never let it play past the last frame.
+    pcm = pcm[:len(au) * AUDIO_RATE // fps]
     pcm = pcm[:len(pcm) // 4 * 4]                               # whole stereo frames
     cmd = ["ffmpeg","-v","error","-r",str(fps),"-i",es]
     if pcm:

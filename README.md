@@ -58,7 +58,9 @@ python3 run.py --pruefen
 |---|---|
 | `OK (18s Bild, 18s Ton)` | Done. 18 seconds of picture, 18 seconds of sound. |
 | `LEER - nichts geborgen` | The file is 99% zeros. The recovery tool returned an empty shell and there is no video inside it. |
-| `kein Referenzmodus für …` | This recording mode is not known yet. See below. |
+| `kein Referenzmodus: …` | This recording mode is not known yet. See below. |
+| `… passen formal, keiner besteht die Probedekodierung` | References of the right size and rate exist, but none decodes this footage. Usually a sub-mode with different encoder settings, so add a reference from exactly this clip's mode. |
+| `nur 18% der Datei war brauchbar` | The recovery returned this clip in pieces. What came back is real, there is just far less of it than the file size suggests. |
 | `PRUEFEN: …` | Something was built, but it failed the check. Do not trust it. |
 
 `OK` is not a guess. Every finished file has to pass two tests: the container must

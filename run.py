@@ -84,16 +84,28 @@ def analyse(d, segs):
     raw = statistics.median(per_chunk[:len(audio)]) / (statistics.median(audio) / rx.AUDIO_RATE)
     return max_fmb, ids, min(RATES, key=lambda r: abs(r - raw)), raw
 
-def probe(d, segs, donor):
-    """Decode a few frames from the first IDR. A donor with the wrong bit depth or
-    chroma format parses the slice data into noise, and the decoder says so."""
+def probe_chunk(d, segs):
+    """The richest chunk that starts on an IDR, or None.
+
+    A badly fragmented file leaves chunks holding a piece of a frame. Those cannot
+    decode cleanly no matter which reference is used, so testing on one rejects
+    every candidate. Pick the chunk with the most material behind its IDR instead.
+    """
+    best = None
     for a, _ in segs:
         ns = rx.chunk_nals(d, a)
         idr = next((i for i, n in enumerate(ns) if n[0] & 0x1f == 5), None)
-        if idr is not None: break
-    else:
-        return 10**6
-    while idr > 0 and ns[idr-1][0] & 0x1f in (6, 9): idr -= 1
+        if idr is None: continue
+        while idr > 0 and ns[idr-1][0] & 0x1f in (6, 9): idr -= 1
+        if best is None or len(ns) - idr > len(best[0]) - best[1]:
+            best = (ns, idr)
+    return best
+
+def probe(chunk, donor):
+    """Decode a few frames. A reference with the wrong bit depth or chroma format
+    parses the slice data into noise, and the decoder says so."""
+    if chunk is None: return 10**6
+    ns, idr = chunk
     with tempfile.NamedTemporaryFile(suffix=".h264", delete=False) as f:
         f.write(b''.join(b'\x00\x00\x00\x01' + x for x in donor["sps"] + donor["pps"]))
         for n in ns[idr:]: f.write(b'\x00\x00\x00\x01' + n)
@@ -135,16 +147,22 @@ def handle(name, donors, rot, triage_only):
     # Geometry and PPS coverage are not enough: a reference from the same
     # resolution but another frame rate decodes without complaint and still lands
     # a few dB off, because the rest of its SPS/PPS was tuned for that mode.
-    pick = next((c for c in donors
-                 if c["mbs"] > mbs and c["fps"] == fps and set(ids) <= set(c["pps_ids"])
-                 and probe(d, segs, c) == 0), None)
+    fits = [c for c in donors if c["mbs"] > mbs and c["fps"] == fps
+            and set(ids) <= set(c["pps_ids"])]
+    if not fits:
+        return (name, size, f"{fps}p", "-", "-",
+                f"kein Referenzmodus: {mbs+1}+ Makrobloecke, {fps}p, PPS {sorted(ids)}")
+    chunk = probe_chunk(d, segs)
+    pick = next((c for c in fits if probe(chunk, c) == 0), None)
     if not pick:
         return (name, size, f"{fps}p", "-", "-",
-                f"kein Referenzmodus fuer {mbs*16} MB / PPS {sorted(ids)}")
+                f"{len(fits)} Referenzmodus/e passen formal, keiner besteht die "
+                f"Probedekodierung")
     if triage_only:
         return (name, size, f"{fps}p", pick["name"], "-", f"bereit ({vbytes/1e6:.0f} MB Video)")
 
     out = os.path.join(OUT, os.path.splitext(name)[0] + "_recovered.mov")
+    cover = vbytes / len(d)
     del d, segs
     try:
         frames, secs, _ = rx.rebuild(path, pick["sps"], pick["pps"], out, fps, rot,
@@ -153,6 +171,12 @@ def handle(name, donors, rot, triage_only):
         return (name, size, f"{fps}p", pick["name"], "-", str(e))
     boxed, shown, errs = check(out)
     drift = "" if abs(raw - fps) / fps < 0.01 else f", gemessen {raw:.2f}"
+    # far less picture than the file could hold means the carve returned it in
+    # pieces, and then the surviving sound no longer lines up with what is left
+    # only a fraction of the file held a usable chain, so the carve returned this
+    # clip in pieces and most of it is simply not there
+    if cover < 0.5:
+        drift += f", nur {cover*100:.0f}% der Datei war brauchbar"
     return (name, size, f"{fps}p", pick["name"], str(shown),
             f"OK ({frames/fps:.0f}s Bild, {secs:.0f}s Ton){drift}" if boxed == shown and errs == 0
             else f"PRUEFEN: {boxed}/{shown} Frames, {errs} Fehler")
