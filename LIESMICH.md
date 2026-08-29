@@ -92,3 +92,7 @@ Einzelne Datei ohne den Stapellauf:
 ```bash
 python3 lib/recover_xavc.py KAPUTT.MP4 REFERENZ.MP4 AUSGABE.mov 25 90
 ```
+
+---
+
+Copyright (c) 2026 Ben Drape. Alle Rechte vorbehalten.

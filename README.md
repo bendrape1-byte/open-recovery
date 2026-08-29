@@ -176,5 +176,8 @@ bitstream.
 
 ---
 
-`LIESMICH.md` is the same guide in German. MIT licensed.
+`LIESMICH.md` is the same guide in German.
+
+Copyright (c) 2026 Ben Drape. All rights reserved. This code is not licensed for
+use, copying, modification or distribution by anyone else.
 Written with [Claude Code](https://claude.com/claude-code).
