@@ -85,7 +85,7 @@ def analyse(d, segs):
         per_chunk.append(n0)
     audio = []
     for i in range(len(segs) - 1):
-        k = d[segs[i][1]:segs[i+1][0]].find(rx.KLV)
+        k = rx.klv_at(d, segs[i][1], segs[i+1][0])
         if k > rx.AUDIO_HDR: audio.append(k - rx.AUDIO_HDR)
     if not audio or len(per_chunk) < 2:
         return max_fmb, ids, None, None

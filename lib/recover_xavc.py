@@ -264,6 +264,15 @@ def chunk_nals(d, a):
         if n[0] & 0x1f == 9: return ns[i:]         # access unit delimiter
     return ns
 
+def klv_at(d, a, b):
+    """Where the metadata track starts inside a gap, or -1.
+
+    Searched with bounds rather than on a slice: the gaps run to tens of
+    megabytes on a fragmented file, and slicing would copy every one of them.
+    """
+    k = d.find(KLV, a, b)
+    return k - a if k >= 0 else -1
+
 def audio_from_gaps(d, segs):
     """LPCM sits at the head of every gap, ahead of the KLV metadata track.
 
@@ -274,16 +283,16 @@ def audio_from_gaps(d, segs):
     gaps = [(segs[i][1], segs[i+1][0]) for i in range(len(segs)-1)]
     found = []
     for a, b in gaps:
-        k = d[a:b].find(KLV)
+        k = klv_at(d, a, b)
         if k > AUDIO_HDR: found.append(k - AUDIO_HDR)
     if not found: return b''
     usual = collections.Counter(found).most_common(1)[0][0]
-    out = b''
+    out = []
     for a, b in gaps:
-        k = d[a:b].find(KLV)
+        k = klv_at(d, a, b)
         n = min(k - AUDIO_HDR, usual) if k > AUDIO_HDR else usual
-        out += d[a:a+min(n, b-a)]
-    return out
+        out.append(d[a:a+min(n, b-a)])
+    return b''.join(out)
 
 # ---------------------------------------------------------------- mp4 surgery
 
